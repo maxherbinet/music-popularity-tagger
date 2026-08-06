@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "music-popularity-tagger"
+version = "0.1.0"
+description = "Estimate Popularity/Energy/Danceability for tracks from filenames alone, no audio required."
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31",
+    "python-dotenv>=1.0",
+    "rapidfuzz>=3.6",
+]
+
+[project.scripts]
+tagger = "tagger.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

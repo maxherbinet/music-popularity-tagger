@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.tagger_cache.sqlite3
+results.csv
+*.egg-info/
