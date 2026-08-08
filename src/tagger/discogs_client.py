@@ -1,10 +1,17 @@
 """Discogs API client, used as a fallback popularity source.
 
-Requires a free personal access token from
+Accepts either of Discogs' two credential types from
 https://www.discogs.com/settings/developers — self-serve, issued
-instantly, no app review. Discogs is the de-facto catalog for
-underground/vinyl dance music, so it tends to know about releases that
-Deezer and mainstream streaming catalogs don't carry at all.
+instantly, no app review:
+  - a personal access token (single string), or
+  - a Consumer Key + Consumer Secret pair (issued when you register an
+    "Application" instead of generating a token)
+Both are sent the same way, as query parameters, and grant the same
+read-only catalog access — no OAuth handshake needed for either.
+
+Discogs is the de-facto catalog for underground/vinyl dance music, so it
+tends to know about releases that Deezer and mainstream streaming catalogs
+don't carry at all.
 
 There's no "popularity" field, so we use the release's community `want`
 count (how many Discogs users have it on their wantlist) as a proxy —
@@ -47,8 +54,21 @@ class DiscogsMatch:
 
 
 class DiscogsClient:
-    def __init__(self, token: str, contact: str = "music-popularity-tagger", session: requests.Session | None = None):
-        self._token = token
+    def __init__(
+        self,
+        token: str | None = None,
+        key: str | None = None,
+        secret: str | None = None,
+        contact: str = "music-popularity-tagger",
+        session: requests.Session | None = None,
+    ):
+        if token:
+            self._auth_params = {"token": token}
+        elif key and secret:
+            self._auth_params = {"key": key, "secret": secret}
+        else:
+            raise ValueError("DiscogsClient needs either token=, or both key= and secret=")
+
         self._user_agent = f"music-popularity-tagger/0.1 ( {contact} )"
         self._session = session or requests.Session()
         self._last_request_at = 0.0
@@ -59,7 +79,7 @@ class DiscogsClient:
             time.sleep(_MIN_INTERVAL_SECONDS - elapsed)
         resp = self._session.get(
             url,
-            params={**params, "token": self._token},
+            params={**params, **self._auth_params},
             headers={"User-Agent": self._user_agent},
             timeout=15,
         )

@@ -51,7 +51,10 @@ Fill in `.env` — every credential below is free and self-serve with no
 approval wait, and every one is optional (a source without credentials is
 just skipped, and Deezer alone needs nothing):
 - `LASTFM_API_KEY` — https://www.last.fm/api/account/create
-- `DISCOGS_TOKEN` — https://www.discogs.com/settings/developers
+- `DISCOGS_TOKEN` (personal access token) **or** `DISCOGS_KEY` +
+  `DISCOGS_SECRET` (Consumer Key/Secret, issued if you registered an
+  "Application" instead of generating a token) — either form works, from
+  https://www.discogs.com/settings/developers
 - `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` — https://developer.spotify.com/dashboard
   (Client Credentials flow, no redirect URI or user login needed)
 - `MUSICBRAINZ_CONTACT_EMAIL` — any contact string, required by

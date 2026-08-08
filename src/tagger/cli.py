@@ -125,15 +125,19 @@ def _build_sources(names: list[str]) -> list[tuple[str, SearchFn]]:
 
         elif name == "discogs":
             token = os.environ.get("DISCOGS_TOKEN")
-            if not token:
+            key = os.environ.get("DISCOGS_KEY")
+            secret = os.environ.get("DISCOGS_SECRET")
+            if not token and not (key and secret):
                 print(
-                    "Skipping discogs: DISCOGS_TOKEN not set (free, instant token at "
-                    "https://www.discogs.com/settings/developers)",
+                    "Skipping discogs: neither DISCOGS_TOKEN nor DISCOGS_KEY+DISCOGS_SECRET are set "
+                    "(free, instant credentials at https://www.discogs.com/settings/developers)",
                     file=sys.stderr,
                 )
                 continue
             contact = os.environ.get("MUSICBRAINZ_CONTACT_EMAIL", "music-popularity-tagger")
-            sources.append((name, _discogs_search_fn(DiscogsClient(token, contact=contact))))
+            sources.append(
+                (name, _discogs_search_fn(DiscogsClient(token=token, key=key, secret=secret, contact=contact)))
+            )
 
         elif name == "spotify":
             client_id = os.environ.get("SPOTIFY_CLIENT_ID")
