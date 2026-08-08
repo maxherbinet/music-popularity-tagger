@@ -22,6 +22,10 @@ from .scoring import CSV_FIELDNAMES, MatchInfo, build_result
 
 DEFAULT_SOURCES = "deezer,lastfm,discogs,spotify"
 DEFAULT_MIN_CONFIDENCE = 55.0
+# Fallback when MUSICBRAINZ_CONTACT_EMAIL isn't set. Just a contact string
+# for MusicBrainz/Discogs's User-Agent policy, not an account — swap for a
+# real inbox before running at any real volume.
+DEFAULT_MUSICBRAINZ_CONTACT_EMAIL = "contact@djmaksr.com"
 
 SearchFn = Callable[[str | None, str], "MatchInfo | None"]
 
@@ -143,7 +147,7 @@ def _build_sources(names: list[str]) -> list[tuple[str, SearchFn]]:
                     file=sys.stderr,
                 )
                 continue
-            contact = os.environ.get("MUSICBRAINZ_CONTACT_EMAIL", "music-popularity-tagger")
+            contact = os.environ.get("MUSICBRAINZ_CONTACT_EMAIL", DEFAULT_MUSICBRAINZ_CONTACT_EMAIL)
             sources.append(
                 (name, _discogs_search_fn(DiscogsClient(token=token, key=key, secret=secret, contact=contact)))
             )
@@ -211,15 +215,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"Popularity source chain: {' -> '.join(name for name, _ in sources)}", file=sys.stderr)
 
-    contact = os.environ.get("MUSICBRAINZ_CONTACT_EMAIL")
-    if not args.skip_genre and not contact:
-        print(
-            "Missing MUSICBRAINZ_CONTACT_EMAIL (required by MusicBrainz's usage policy for their User-Agent header).\n"
-            "It's just a contact string, not an account — set any email in .env, or pass --skip-genre to run "
-            "Popularity-only.",
-            file=sys.stderr,
-        )
-        return 1
+    contact = os.environ.get("MUSICBRAINZ_CONTACT_EMAIL", DEFAULT_MUSICBRAINZ_CONTACT_EMAIL)
 
     tracks = load_tracks(args.input, fmt=args.format)
     if args.limit:
