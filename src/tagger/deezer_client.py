@@ -20,6 +20,7 @@ from dataclasses import dataclass
 
 import requests
 from rapidfuzz import fuzz
+from rapidfuzz.utils import default_process
 
 _SEARCH_URL = "https://api.deezer.com/search"
 _RANK_SCALE_MAX = 1_000_000
@@ -71,7 +72,7 @@ class DeezerClient:
         best_score = -1.0
         for item in candidates:
             candidate_str = f"{(item.get('artist') or {}).get('name', '')} {item.get('title', '')}"
-            score = fuzz.token_sort_ratio(query_target, candidate_str)
+            score = fuzz.token_sort_ratio(query_target, candidate_str, processor=default_process)
             if score > best_score:
                 best_score = score
                 best = item

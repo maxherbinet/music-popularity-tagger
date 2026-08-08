@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 import requests
 from rapidfuzz import fuzz
+from rapidfuzz.utils import default_process
 
 _TOKEN_URL = "https://accounts.spotify.com/api/token"
 _SEARCH_URL = "https://api.spotify.com/v1/search"
@@ -88,7 +89,7 @@ class SpotifyClient:
         for item in candidates:
             item_artist = ", ".join(a["name"] for a in item.get("artists", []))
             candidate_str = f"{item_artist} {item['name']}"
-            score = fuzz.token_sort_ratio(query_target, candidate_str)
+            score = fuzz.token_sort_ratio(query_target, candidate_str, processor=default_process)
             if score > best_score:
                 best_score = score
                 best = item
