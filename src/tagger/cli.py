@@ -113,7 +113,11 @@ def _build_sources(names: list[str]) -> list[tuple[str, SearchFn]]:
             sources.append((name, _deezer_search_fn(DeezerClient())))
 
         elif name == "lastfm":
-            key = os.environ.get("LASTFM_API_KEY")
+            # LASTFM_APIKEY accepted as an alias for LASTFM_API_KEY. The
+            # secret Last.fm issues alongside the key is for the write/session
+            # auth flow and isn't needed for this read-only search, so
+            # LASTFM_SECRET is intentionally not read here.
+            key = os.environ.get("LASTFM_API_KEY") or os.environ.get("LASTFM_APIKEY")
             if not key:
                 print(
                     "Skipping lastfm: LASTFM_API_KEY not set (free, instant key at "
@@ -127,6 +131,11 @@ def _build_sources(names: list[str]) -> list[tuple[str, SearchFn]]:
             token = os.environ.get("DISCOGS_TOKEN")
             key = os.environ.get("DISCOGS_KEY")
             secret = os.environ.get("DISCOGS_SECRET")
+            if not token and key and not secret:
+                # DISCOGS_KEY set alone (no secret) is treated as a personal
+                # access token rather than the first half of a consumer
+                # key/secret pair.
+                token, key = key, None
             if not token and not (key and secret):
                 print(
                     "Skipping discogs: neither DISCOGS_TOKEN nor DISCOGS_KEY+DISCOGS_SECRET are set "
