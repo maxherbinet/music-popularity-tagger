@@ -8,6 +8,7 @@ import time
 from collections import Counter
 from typing import Callable
 
+import requests
 from dotenv import load_dotenv
 
 from .cache import Cache, normalize_key
@@ -238,7 +239,11 @@ def main(argv: list[str] | None = None) -> int:
             cache_ns = f"match_{source_name}"
             cached = cache.get(cache_ns, key) if cache else None
             if cached is None:
-                found = search_fn(artist, title)
+                try:
+                    found = search_fn(artist, title)
+                except requests.exceptions.RequestException as exc:
+                    print(f"  {source_name} request failed for {artist!r} - {title!r}: {exc}", file=sys.stderr)
+                    continue
                 match_dict = vars(found) if found else {}
                 if cache:
                     cache.set(cache_ns, key, match_dict)
@@ -254,10 +259,15 @@ def main(argv: list[str] | None = None) -> int:
         if mb is not None:
             tags = cache.get("musicbrainz_tags", key) if cache else None
             if tags is None:
-                mb_match = mb.lookup(artist, title)
-                tags = mb_match.tags if mb_match else []
-                if cache:
-                    cache.set("musicbrainz_tags", key, tags)
+                try:
+                    mb_match = mb.lookup(artist, title)
+                except requests.exceptions.RequestException as exc:
+                    print(f"  musicbrainz request failed for {artist!r} - {title!r}: {exc}", file=sys.stderr)
+                    tags = []
+                else:
+                    tags = mb_match.tags if mb_match else []
+                    if cache:
+                        cache.set("musicbrainz_tags", key, tags)
             genre_estimate = estimate_from_tags(tags)
 
         results.append(build_result(track, artist, title, match_obj, genre_estimate))
