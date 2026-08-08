@@ -1,5 +1,8 @@
-"""Combines the per-track signals (Spotify match + genre-derived estimate)
-into a single row for the ranked output report.
+"""Combines the per-track signals (a popularity-source match + genre-derived
+estimate) into a single row for the ranked output report.
+
+Popularity can come from any source client (Deezer, Spotify, ...) as long
+as it's adapted into a MatchInfo first — this module doesn't care which.
 """
 
 from __future__ import annotations
@@ -8,7 +11,16 @@ from dataclasses import dataclass, field
 
 from .genre_heuristics import GenreEstimate
 from .inputs import TrackInput
-from .spotify_client import SpotifyMatch
+
+
+@dataclass
+class MatchInfo:
+    source: str  # e.g. "deezer", "spotify"
+    match_id: str
+    artist: str
+    title: str
+    popularity: int  # 0-100
+    match_confidence: float  # 0-100, fuzzy similarity vs our query
 
 
 @dataclass
@@ -19,9 +31,10 @@ class TrackResult:
     parsed_title: str
 
     matched: bool = False
+    source: str = ""
     matched_artist: str = ""
     matched_title: str = ""
-    spotify_id: str = ""
+    match_id: str = ""
     match_confidence: float = 0.0
     popularity: int | None = None
 
@@ -31,7 +44,7 @@ class TrackResult:
 
     @property
     def worth_score(self) -> float:
-        """Primary triage signal: Spotify popularity when we have a
+        """Primary triage signal: source popularity when we have a
         confident match, 0 otherwise. Energy/Danceability are reported
         separately since they're about set-building fit, not "is this
         worth re-downloading".
@@ -45,6 +58,7 @@ class TrackResult:
             "raw_filename": self.raw_filename,
             "playlist": self.playlist or "",
             "matched": self.matched,
+            "source": self.source,
             "matched_artist": self.matched_artist,
             "matched_title": self.matched_title,
             "match_confidence": self.match_confidence,
@@ -60,7 +74,7 @@ def build_result(
     track: TrackInput,
     parsed_artist: str | None,
     parsed_title: str,
-    spotify_match: SpotifyMatch | None,
+    match: MatchInfo | None,
     genre_estimate: GenreEstimate | None,
 ) -> TrackResult:
     result = TrackResult(
@@ -70,13 +84,14 @@ def build_result(
         parsed_title=parsed_title,
     )
 
-    if spotify_match is not None:
+    if match is not None:
         result.matched = True
-        result.matched_artist = spotify_match.artist
-        result.matched_title = spotify_match.title
-        result.spotify_id = spotify_match.spotify_id
-        result.match_confidence = spotify_match.match_confidence
-        result.popularity = spotify_match.popularity
+        result.source = match.source
+        result.matched_artist = match.artist
+        result.matched_title = match.title
+        result.match_id = match.match_id
+        result.match_confidence = match.match_confidence
+        result.popularity = match.popularity
 
     if genre_estimate is not None:
         result.genre_tags = genre_estimate.matched_tags
@@ -90,6 +105,7 @@ CSV_FIELDNAMES = [
     "raw_filename",
     "playlist",
     "matched",
+    "source",
     "matched_artist",
     "matched_title",
     "match_confidence",
