@@ -13,6 +13,7 @@ def _clean_env(monkeypatch):
         "DISCOGS_SECRET",
         "SPOTIFY_CLIENT_ID",
         "SPOTIFY_CLIENT_SECRET",
+        "YOUTUBE_API_KEY",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -56,3 +57,20 @@ def test_discogs_token_used_directly(monkeypatch):
 def test_discogs_skipped_without_any_credentials():
     sources = _build_sources(["discogs"])
     assert sources == []
+
+
+def test_youtube_api_key_used_directly(monkeypatch):
+    monkeypatch.setenv("YOUTUBE_API_KEY", "key123")
+    sources = _build_sources(["youtube"])
+    assert [name for name, _ in sources] == ["youtube"]
+
+
+def test_youtube_skipped_without_key():
+    sources = _build_sources(["youtube"])
+    assert sources == []
+
+
+def test_default_chain_puts_youtube_last(monkeypatch):
+    from tagger.cli import DEFAULT_SOURCES
+
+    assert DEFAULT_SOURCES.split(",")[-1] == "youtube"

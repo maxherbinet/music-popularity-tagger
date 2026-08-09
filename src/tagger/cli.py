@@ -21,7 +21,7 @@ from .lastfm_client import LastfmClient
 from .musicbrainz_client import MusicBrainzClient
 from .scoring import CSV_FIELDNAMES, MatchInfo, build_result
 
-DEFAULT_SOURCES = "deezer,lastfm,discogs,spotify"
+DEFAULT_SOURCES = "deezer,lastfm,discogs,spotify,youtube"
 DEFAULT_MIN_CONFIDENCE = 55.0
 # Fallback when MUSICBRAINZ_CONTACT_EMAIL isn't set. Just a contact string
 # for MusicBrainz/Discogs's User-Agent policy, not an account — swap for a
@@ -106,6 +106,23 @@ def _spotify_search_fn(client) -> SearchFn:
     return search
 
 
+def _youtube_search_fn(client) -> SearchFn:
+    def search(artist: str | None, title: str) -> MatchInfo | None:
+        match = client.search_track(artist, title)
+        if match is None:
+            return None
+        return MatchInfo(
+            source="youtube",
+            match_id=match.video_id,
+            artist=match.artist,
+            title=match.title,
+            popularity=match.popularity,
+            match_confidence=match.match_confidence,
+        )
+
+    return search
+
+
 def _build_sources(names: list[str]) -> list[tuple[str, SearchFn]]:
     """Builds the ordered fallback chain, skipping any source whose
     required credentials aren't set (with a warning) rather than failing
@@ -166,6 +183,19 @@ def _build_sources(names: list[str]) -> list[tuple[str, SearchFn]]:
             from .spotify_client import SpotifyClient
 
             sources.append((name, _spotify_search_fn(SpotifyClient(client_id, client_secret))))
+
+        elif name == "youtube":
+            api_key = os.environ.get("YOUTUBE_API_KEY")
+            if not api_key:
+                print(
+                    "Skipping youtube: YOUTUBE_API_KEY not set (free key, YouTube Data API v3, at "
+                    "https://console.cloud.google.com/apis/credentials)",
+                    file=sys.stderr,
+                )
+                continue
+            from .youtube_client import YoutubeClient
+
+            sources.append((name, _youtube_search_fn(YoutubeClient(api_key))))
 
         else:
             print(f"Unknown source '{name}', ignoring", file=sys.stderr)
