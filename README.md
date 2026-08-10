@@ -106,8 +106,11 @@ fit, not "is this worth getting back". Sort/filter the CSV however suits you.
 ### Notes on scale and coverage
 
 - MusicBrainz enforces ~1 request/second for unauthenticated clients, and
-  each track needs two calls (search + tag lookup), so genre lookups for
-  ~12k tracks will take several hours. Discogs is similarly two calls/track
+  each track needs two calls (search + tag lookup) — three for most tracks
+  in practice, since individual recordings are rarely tagged on MusicBrainz
+  (genre folksonomy effort goes into artist entities instead), triggering a
+  fallback call to the artist's tags. Genre lookups for ~12k tracks will
+  take several hours either way. Discogs is similarly two calls/track
   (search + release lookup) with a conservative ~1 req/sec throttle. Results
   are cached in `.tagger_cache.sqlite3`, so interrupting and re-running
   picks up where you left off. Use `--skip-genre` if you just want
