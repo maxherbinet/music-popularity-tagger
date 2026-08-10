@@ -90,8 +90,25 @@ def _discogs_search_fn(client: DiscogsClient) -> SearchFn:
 
 
 def _spotify_search_fn(client) -> SearchFn:
+    from .spotify_client import SpotifyPopularityUnavailable
+
+    unavailable = False
+
     def search(artist: str | None, title: str) -> MatchInfo | None:
-        match = client.search_track(artist, title)
+        nonlocal unavailable
+        if unavailable:
+            return None
+        try:
+            match = client.search_track(artist, title)
+        except SpotifyPopularityUnavailable:
+            print(
+                "Disabling spotify for the rest of this run: its API responded without a "
+                "'popularity' field (this app needs Extended Quota Mode — see "
+                "https://developer.spotify.com/dashboard). Falling through to the next source.",
+                file=sys.stderr,
+            )
+            unavailable = True
+            return None
         if match is None:
             return None
         return MatchInfo(

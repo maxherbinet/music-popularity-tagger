@@ -1,6 +1,7 @@
 import pytest
 
-from tagger.cli import _build_sources
+from tagger.cli import _build_sources, _spotify_search_fn
+from tagger.spotify_client import SpotifyPopularityUnavailable
 
 
 @pytest.fixture(autouse=True)
@@ -74,3 +75,27 @@ def test_default_chain_puts_youtube_last(monkeypatch):
     from tagger.cli import DEFAULT_SOURCES
 
     assert DEFAULT_SOURCES.split(",")[-1] == "youtube"
+
+
+class _AlwaysUnavailableClient:
+    def __init__(self):
+        self.calls = 0
+
+    def search_track(self, artist, title):
+        self.calls += 1
+        raise SpotifyPopularityUnavailable
+
+
+def test_spotify_disabled_after_first_popularity_unavailable(capsys):
+    client = _AlwaysUnavailableClient()
+    search = _spotify_search_fn(client)
+
+    assert search("A", "B") is None
+    assert search("C", "D") is None
+    assert search("E", "F") is None
+
+    # Only the first call should have hit the client — after that, spotify
+    # is treated as disabled for the rest of the run rather than repeatedly
+    # calling an API we already know can't answer.
+    assert client.calls == 1
+    assert "Disabling spotify" in capsys.readouterr().err
