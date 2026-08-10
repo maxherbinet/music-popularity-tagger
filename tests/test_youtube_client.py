@@ -53,6 +53,29 @@ def test_search_track_found():
     assert match.views == 5_000_000
     assert 0 < match.popularity <= 100
     assert len(session.urls) == 2  # search + statistics lookup
+    # channelTitle ("Fisher" here, but often a label/aggregator channel in
+    # practice) isn't a reliable artist field, so we echo back the query.
+    assert match.artist == "Fisher"
+
+
+def test_artist_echoes_query_not_uploader_channel():
+    search_payload = {
+        "items": [
+            {
+                "id": {"videoId": "abc123"},
+                "snippet": {"title": "FISHER - Losing It", "channelTitle": "blanc"},
+            }
+        ]
+    }
+    stats_payload = {"items": [{"statistics": {"viewCount": "1000"}}]}
+    session = _FakeSession(search_payload, stats_payload)
+    client = YoutubeClient("fake-key", session=session)
+
+    match = client.search_track("Fisher", "Losing It")
+
+    assert match is not None
+    assert match.artist == "Fisher"
+    assert match.title == "FISHER - Losing It"
 
 
 def test_search_track_no_results():

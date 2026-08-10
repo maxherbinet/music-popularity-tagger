@@ -101,7 +101,12 @@ class YoutubeClient:
 
         return YoutubeMatch(
             video_id=video_id,
-            artist=best["snippet"].get("channelTitle", artist or ""),
+            # The channel that uploaded a video is frequently a label/
+            # aggregator/fan channel rather than the actual artist (seen live:
+            # a "Fisher - Losing It" upload from a channel called "blanc"), so
+            # there's no reliable structured artist field to report here —
+            # echo back the artist we searched for instead.
+            artist=artist or "",
             title=best["snippet"].get("title", title),
             views=views,
             popularity=normalize_views(views),
