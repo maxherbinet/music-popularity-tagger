@@ -15,6 +15,8 @@ dependencies = [
 
 [project.scripts]
 tagger = "tagger.cli:main"
+tagger-diff = "tagger.nas_diff:main"
+tagger-recommend = "tagger.folder_recommend:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

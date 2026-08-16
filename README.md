@@ -134,6 +134,60 @@ useful *after* you've decided which folders to keep, as a way to selectively
 import just those into Rekordbox/Serato without re-importing everything into
 Lexicon and re-triggering its duplicate detection.
 
+### Folder-level copy recommendations: NAS vs. working drive
+
+If some of the recovered NAS files already exist on your current working
+drive (USB/local), scoring and reviewing all 12k of them is overkill — what
+actually matters is what's *missing*, and even then, deciding per-folder
+beats deciding per-track. This is a three-tool pipeline built on top of
+everything above:
+
+```powershell
+# 1. Inventory both sides with the same script
+.\Export-MusicLibraryInventory.ps1 -RootPath '\\NAS\Music' -OutputDir .\nas
+.\Export-MusicLibraryInventory.ps1 -RootPath 'D:\DJ\Current' -OutputDir .\usb
+```
+```bash
+# 2. Keep only what's missing from the working drive (matched by artist+title, not path)
+tagger-diff --nas nas/inventory.csv --usb usb/inventory.csv -o nas_only.csv
+
+# 3. Score just the missing tracks (reuses the whole fallback chain above)
+tagger nas_only.csv -o scored.csv
+
+# 4. Turn that into folder-level verdicts
+tagger-recommend --inventory nas_only.csv --scored scored.csv \
+    --min-popularity 40 --min-danceability 40 \
+    --generate-copy-script --nas-root '\\NAS\Music' --usb-root 'D:\DJ\Current'
+```
+
+`tagger-recommend` groups the missing tracks by their actual containing
+folder and, per folder, checks whether it has a **dominant artist or
+genre** (`--coherence-threshold`, default 50%). Folders that do get one
+verdict; folders that don't (a dump folder like `2011.04` full of unrelated
+downloads) fall back to a per-track verdict in `individual_review.csv`
+instead of a folder-wide guess. For folders (or tracks) with a signal, the
+rule is: **eligible** if avg popularity ≥ `--min-popularity` *or* avg
+danceability ≥ `--min-danceability` — and if eligible, **COPY** unless at
+least `--low-bitrate-pct-threshold`% (default 50%) of the files are
+low-bitrate MP3s, in which case it's **FLAG_REBUY** (worth having, but
+worth chasing a better copy of rather than propagating 128kbps files onto
+the working drive). Not eligible → **SKIP**, no recommendation.
+
+Output:
+- `folder_recommendations.csv` — one row per folder: verdict, avg
+  popularity/danceability, % low-bitrate, dominant artist/genre and its share.
+- `individual_review.csv` — one row per track, only for the dump/incoherent
+  folders that got punted to per-track review.
+- `copy_commands.ps1` (with `--generate-copy-script`) — `robocopy /E` per
+  COPY-verdict folder, `Copy-Item` per individually-flagged track. **Review
+  it before running it** — nothing in this pipeline executes a copy on its
+  own; the script is a reviewable artifact, not an automatic action.
+
+This whole pipeline was tested end-to-end against real files (pwsh +
+MediaInfo installed and run against synthetic fixtures, including accented
+filenames and embedded quotes/commas) before being handed off, not shipped
+on faith.
+
 ### Notes on scale and coverage
 
 - MusicBrainz enforces ~1 request/second for unauthenticated clients, and
