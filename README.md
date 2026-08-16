@@ -93,6 +93,47 @@ breakdown (also printed at the end of each run).
 Energy/Danceability are reported separately since they're about set-building
 fit, not "is this worth getting back". Sort/filter the CSV however suits you.
 
+## Recovering from a NAS/backup instead of filenames alone
+
+If some of the "lost" files actually survived on a backup/NAS,
+`scripts/Export-MusicLibraryInventory.ps1` builds the same kind of CSV
+directly from those real files — no need to reconstruct anything from
+filenames. It recursively scans a folder tree and uses
+[MediaInfo](https://mediaarea.net/en/MediaInfo/Download) (free, portable,
+no install) to read each file's real format/bitrate/duration/tags from the
+file itself, deliberately without touching Serato/Lexicon/Rekordbox at all:
+
+```powershell
+.\Export-MusicLibraryInventory.ps1 -RootPath '\\NAS\Music\Recovered' -Limit 50   # smoke test first
+.\Export-MusicLibraryInventory.ps1 -RootPath '\\NAS\Music\Recovered'
+```
+
+It writes two files:
+- `inventory.csv` — one row per file, columns named to match what
+  `tagger`'s CSV loader expects (`filename`, `artist`, `title`, `playlist`),
+  plus `format`, `bitrate_kbps`, `duration_min`, `low_bitrate`. Feed it
+  straight into the popularity scoring above: `tagger inventory.csv -o results.csv`.
+- `folder_summary.csv` — one row per folder (file count, average bitrate,
+  % lossless, % at/below the low-bitrate threshold), sorted by file count
+  descending, as a starting point for spotting which folders look like
+  real curated sets worth a closer look for a wedding/party set, versus
+  ones full of old 128kbps MP3s worth re-ripping.
+
+Run it from any machine that can reach the NAS share over the network
+(mapped drive or UNC path) — that's much simpler than running it on an old
+Windows Server 2008 R2 box directly, which likely has an ancient PowerShell
+version and no easy way to fetch MediaInfo. The script itself is read-only:
+it never writes to Serato/Lexicon/Rekordbox, so it can't create duplicate
+entries there.
+
+On whether it's worth building a Serato or Rekordbox database from this
+instead: not for this triage step — a Serato database is an undocumented
+binary format not worth reverse-engineering just for browsing, and
+Rekordbox's XML format, while a clean documented interop format, is more
+useful *after* you've decided which folders to keep, as a way to selectively
+import just those into Rekordbox/Serato without re-importing everything into
+Lexicon and re-triggering its duplicate detection.
+
 ### Notes on scale and coverage
 
 - MusicBrainz enforces ~1 request/second for unauthenticated clients, and
