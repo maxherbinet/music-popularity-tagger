@@ -1,7 +1,7 @@
 import csv
 from pathlib import Path
 
-from tagger.nas_diff import find_missing, load_inventory, split_by_match
+from tagger.nas_diff import cluster_matches_by_folder, find_missing, load_inventory, split_by_match
 
 
 def _write_inventory(path: Path, rows: list[dict]):
@@ -114,3 +114,38 @@ def test_missing_list_source_without_technical_columns_still_works(tmp_path: Pat
     assert matched[0][1]["full_path"] == "E:\\NAS\\x.mp3"
     assert len(missing) == 1
     assert missing[0]["title"] == "Some Lost Track"
+
+
+def _pair(artist, title, full_path, bitrate_kbps="320", low_bitrate="False"):
+    missing_row = {"artist": artist, "title": title}
+    found_row = {"artist": artist, "title": title, "full_path": full_path,
+                 "bitrate_kbps": bitrate_kbps, "low_bitrate": low_bitrate, "format": "MPEG Audio"}
+    return missing_row, found_row
+
+
+def test_cluster_matches_by_folder_groups_and_sorts_by_size():
+    matched = [
+        _pair("The Beatles", "Let It Be", "E:\\NAS\\The Beatles\\Let It Be (2009)\\01.flac", bitrate_kbps="900"),
+        _pair("The Beatles", "Get Back", "E:\\NAS\\The Beatles\\Let It Be (2009)\\02.flac", bitrate_kbps="900"),
+        _pair("Fisher", "Losing It", "E:\\NAS\\Fisher\\Losing It.mp3", bitrate_kbps="128", low_bitrate="True"),
+    ]
+
+    clusters = cluster_matches_by_folder(matched)
+
+    assert clusters[0]["folder"] == "E:\\NAS\\The Beatles\\Let It Be (2009)"
+    assert clusters[0]["track_count"] == 2
+    assert clusters[0]["avg_bitrate_kbps"] == 900
+    assert clusters[0]["pct_low_bitrate"] == 0.0
+
+    fisher_cluster = next(c for c in clusters if c["folder"] == "E:\\NAS\\Fisher")
+    assert fisher_cluster["track_count"] == 1
+    assert fisher_cluster["pct_low_bitrate"] == 100.0
+    assert "Fisher - Losing It" in fisher_cluster["sample_titles"]
+
+
+def test_cluster_matches_by_folder_truncates_sample_titles():
+    matched = [_pair("Artist", f"Track {i}", f"E:\\NAS\\Big Folder\\{i}.mp3") for i in range(5)]
+    clusters = cluster_matches_by_folder(matched, sample_size=3)
+    assert clusters[0]["track_count"] == 5
+    assert clusters[0]["sample_titles"].endswith("...")
+    assert clusters[0]["sample_titles"].count(";") == 2  # 3 sample titles joined by "; "
