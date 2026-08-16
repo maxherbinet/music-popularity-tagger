@@ -112,6 +112,29 @@ def split_by_match(
     return missing, matched
 
 
+def _is_low_bitrate(found_row: dict) -> bool:
+    return str(found_row.get("low_bitrate", "")).strip().lower() in ("true", "1", "yes")
+
+
+def partition_by_quality(matched: list[tuple[dict, dict]]) -> tuple[list[tuple[dict, dict]], list[dict]]:
+    """Splits matched pairs into (good_quality, low_quality_nas_rows).
+
+    A match found only in low-bitrate form isn't a real recovery if the
+    goal is banning 128kbps files — it just tells you the track exists
+    somewhere, in a copy not worth propagating. low_quality_nas_rows
+    returns just the original (missing-list) rows, ready to be merged back
+    into a "still need a better copy" bucket.
+    """
+    good: list[tuple[dict, dict]] = []
+    low_quality: list[dict] = []
+    for nas_row, usb_row in matched:
+        if _is_low_bitrate(usb_row):
+            low_quality.append(nas_row)
+        else:
+            good.append((nas_row, usb_row))
+    return good, low_quality
+
+
 def cluster_matches_by_folder(matched: list[tuple[dict, dict]], sample_size: int = 3) -> list[dict]:
     """Groups matched (missing_row, found_row) pairs by the folder the found
     file actually lives in, so a big batch of individually-recovered tracks
@@ -190,6 +213,13 @@ def main(argv: list[str] | None = None) -> int:
         help="If set (0-100), also fuzzy-match near-identical artist/title (e.g. minor typos) at or above this "
         "score before considering a track missing. Off by default — exact normalized match only.",
     )
+    parser.add_argument(
+        "--exclude-low-bitrate",
+        action="store_true",
+        help="A match found only in low-bitrate form (per the source inventory's low_bitrate flag, e.g. a "
+        "128kbps MP3) doesn't count as recovered — it's moved into the missing/--output list instead of "
+        "--matches-output, since it still needs a better copy from somewhere else.",
+    )
     args = parser.parse_args(argv)
 
     nas_rows = load_inventory(args.nas)
@@ -197,6 +227,16 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Loaded {len(nas_rows)} NAS rows, {len(usb_rows)} USB rows", file=sys.stderr)
 
     missing, matched = split_by_match(nas_rows, usb_rows, fuzzy_threshold=args.fuzzy_threshold)
+
+    if args.exclude_low_bitrate:
+        matched, low_quality = partition_by_quality(matched)
+        if low_quality:
+            missing = missing + low_quality
+            print(
+                f"{len(low_quality)} matches were low-bitrate and moved to {args.output} instead of "
+                f"{args.matches_output or '(no --matches-output)'}",
+                file=sys.stderr,
+            )
 
     with open(args.output, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=INVENTORY_FIELDNAMES)

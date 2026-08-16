@@ -1,7 +1,13 @@
 import csv
 from pathlib import Path
 
-from tagger.nas_diff import cluster_matches_by_folder, find_missing, load_inventory, split_by_match
+from tagger.nas_diff import (
+    cluster_matches_by_folder,
+    find_missing,
+    load_inventory,
+    partition_by_quality,
+    split_by_match,
+)
 
 
 def _write_inventory(path: Path, rows: list[dict]):
@@ -149,3 +155,24 @@ def test_cluster_matches_by_folder_truncates_sample_titles():
     assert clusters[0]["track_count"] == 5
     assert clusters[0]["sample_titles"].endswith("...")
     assert clusters[0]["sample_titles"].count(";") == 2  # 3 sample titles joined by "; "
+
+
+def test_partition_by_quality_moves_low_bitrate_out_of_good():
+    matched = [
+        _pair("Fisher", "Losing It", "E:\\NAS\\a.flac", bitrate_kbps="900", low_bitrate="False"),
+        _pair("Old Band", "Old Song", "E:\\NAS\\b.mp3", bitrate_kbps="128", low_bitrate="True"),
+    ]
+
+    good, low_quality = partition_by_quality(matched)
+
+    assert len(good) == 1
+    assert good[0][0]["artist"] == "Fisher"
+    assert len(low_quality) == 1
+    assert low_quality[0]["artist"] == "Old Band"
+
+
+def test_partition_by_quality_empty_when_all_good():
+    matched = [_pair("Fisher", "Losing It", "E:\\NAS\\a.mp3", bitrate_kbps="320", low_bitrate="False")]
+    good, low_quality = partition_by_quality(matched)
+    assert len(good) == 1
+    assert low_quality == []
