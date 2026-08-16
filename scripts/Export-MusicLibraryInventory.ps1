@@ -88,6 +88,15 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Without this, on a machine whose OS locale uses a comma as the decimal
+# separator (e.g. French Windows), [math]::Round() results get stringified
+# with a comma ("0,25") instead of a period ("0.25") when written to CSV —
+# breaking any numeric parsing of duration_min/filesize_mb/etc downstream.
+# Forcing invariant culture makes all number-to-string conversions in this
+# script use "." regardless of the server's regional settings.
+[System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::InvariantCulture
+[System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
+
 # Without this, accented characters (é, à, ç...) coming back from MediaInfo's
 # stdout can get mis-decoded on Windows depending on the console's codepage —
 # a classic PowerShell gotcha when capturing external process output. Since
