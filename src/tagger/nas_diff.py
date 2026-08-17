@@ -1,17 +1,36 @@
-"""Diffs a NAS inventory against a USB (or any other) inventory to find
-tracks that only exist on the NAS — i.e. what's actually missing from the
-working library, as opposed to everything on the NAS.
+"""Diffs a "wanted" list against a "have" inventory to find which wanted
+tracks are actually missing vs. already recoverable.
 
-Both inputs are expected to be in the format produced by
+The --usb side is expected to be in the format produced by
 scripts/Export-MusicLibraryInventory.ps1 (filename, artist, title, playlist,
 genre, format, extension, bitrate_kbps, duration_min, filesize_mb,
-low_bitrate, full_path).
+low_bitrate, full_path) — a real scan of physical files.
 
-Matching is by normalized artist+title, not by path or filename (NAS and
-USB paths are necessarily different) or file hash (we don't have the USB
-files' bytes here, just their inventory). When a row's artist/title tags
-are blank, falls back to parsing them out of the filename the same way the
-main `tagger` CLI does, for consistency.
+The --nas side is more flexible: it only strictly needs artist+title (or a
+filename to parse them out of), so a DJ software's own "missing tracks"
+export works directly too — e.g. Lexicon's "MissingOnly" playlist export
+(title/artist/albumTitle columns), which is often a better source of truth
+for "what's actually missing" than re-deriving it from a fresh rescan, since
+the DJ software already tracked it. In that case what's semantically the
+"wanted" list plays the --nas role and a physical NAS/backup scan plays the
+--usb role — the flag names are historical, not a hard requirement about
+which side is which.
+
+Matching is by normalized artist+title, not by path or filename (the two
+sides' paths are necessarily different) or file hash. When a row's
+artist/title tags are blank, falls back to parsing them out of the filename
+the same way the main `tagger` CLI does, for consistency.
+
+Outputs beyond the basic --output (still-missing) list:
+  --matches-output          tracks that ARE found on the --usb side, with
+                             that copy's format/bitrate/full_path attached.
+  --folder-clusters-output  those matches grouped by the folder they were
+                             found in, for batch/robocopy-sized decisions
+                             instead of one-track-at-a-time review.
+  --exclude-low-bitrate     a match found only in low-bitrate form doesn't
+                             count as recovered — it's routed back into the
+                             missing/--output list instead, since it still
+                             needs a better copy from somewhere else.
 """
 
 from __future__ import annotations

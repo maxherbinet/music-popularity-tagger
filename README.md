@@ -134,13 +134,73 @@ useful *after* you've decided which folders to keep, as a way to selectively
 import just those into Rekordbox/Serato without re-importing everything into
 Lexicon and re-triggering its duplicate detection.
 
-### Folder-level copy recommendations: NAS vs. working drive
+### If your DJ software already knows what's missing (e.g. Lexicon's "MissingOnly" export)
 
-If some of the recovered NAS files already exist on your current working
-drive (USB/local), scoring and reviewing all 12k of them is overkill — what
-actually matters is what's *missing*, and even then, deciding per-folder
-beats deciding per-track. This is a three-tool pipeline built on top of
-everything above:
+This is usually a better starting point than rescanning a working drive
+from scratch: most DJ software already tracks which library tracks have a
+broken/missing file link, complete with the original artist/title metadata
+even though the file itself is gone. Lexicon in particular can export a
+smart-list like "MissingOnly" to CSV — as long as it has *some* artist/title
+columns (even a raw Lexicon export where everything sits in a `title`
+column like `"Artist - Song Title"` with a blank `artist` works fine,
+`tagger`'s filename-parsing fallback handles it), it can be fed straight
+into `tagger-diff` as the "wanted" list, with a physical NAS/backup scan as
+the "have" list:
+
+```bash
+# 1. Inventory whatever NAS/backup you have (Export-MusicLibraryInventory.ps1,
+#    run once per physically distinct drive/tree — a NAS can have more than one)
+
+# 2. Match Lexicon's missing-list against what's really recoverable, and
+#    cluster the recoverable ones by folder in the same pass
+tagger-diff --nas MissingOnly.csv --usb nas/inventory.csv \
+    -o still_missing.csv \
+    --matches-output recoverable.csv \
+    --folder-clusters-output recoverable_folders.csv \
+    --exclude-low-bitrate
+```
+
+If there's more than one NAS tree/drive worth checking, repeat step 2,
+feeding the previous run's `still_missing.csv` back in as `--nas` against
+the next tree's inventory — each pass only narrows what's still missing, so
+nothing gets re-processed. Only treat the final `still_missing.csv` as
+genuinely gone once every location has been checked.
+
+- `recoverable.csv` — wanted tracks that ARE physically present somewhere
+  in the inventory, with that copy's real format/bitrate/full_path attached
+  (`matched_*` columns) so you know exactly where to grab it from.
+- `recoverable_folders.csv` — those recoverable tracks grouped by the
+  folder they live in (track count, avg bitrate, sample titles), sorted by
+  cluster size — the actual "worth a batch robocopy" view, versus one-off
+  singles better handled by hand straight from `recoverable.csv`.
+- `--exclude-low-bitrate` matters if you have a quality bar (e.g. no
+  128kbps): a match only found in low-bitrate form is treated as *not*
+  recovered and routed back into `still_missing.csv` instead of
+  `recoverable.csv`/the clusters, since propagating a 128kbps copy isn't
+  actually a win.
+- `still_missing.csv` (after every NAS tree is checked) is the real
+  "nowhere to be found" list — feed it into the popularity scoring above
+  (`tagger still_missing.csv -o scored.csv --skip-genre`, drop
+  `--skip-genre` if you also want Energy/Danceability) to prioritize what's
+  actually worth re-buying/re-downloading.
+
+Validated against a real ~12k-track Lexicon export and two separate NAS
+trees (~3.4k and ~19k files): resolved to thousands of genuinely
+recoverable tracks clustered into a few hundred folders, with a handful of
+large clusters alone accounting for most of the recovered volume —
+clustering by folder, not scoring every track individually, is what made
+that volume tractable.
+
+### Folder-level copy recommendations without an authoritative missing list
+
+If you don't have something like a Lexicon "MissingOnly" export to start
+from — just two live scans to compare (e.g. a NAS and a working USB drive,
+with no source of truth for what's actually supposed to be there) —
+`tagger-recommend` derives folder-level verdicts from popularity/
+danceability scoring instead of an authoritative missing-list match:
+scoring and reviewing everything track-by-track is overkill, and deciding
+per-folder beats deciding per-track here too. This is a three-tool pipeline
+built on top of everything above:
 
 ```powershell
 # 1. Inventory both sides with the same script
