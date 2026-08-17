@@ -1,6 +1,7 @@
 import pytest
 
-from tagger.cli import _build_sources, _spotify_search_fn
+from tagger.cli import _build_sources, _resolve_artist_title_candidates, _spotify_search_fn
+from tagger.inputs import TrackInput
 from tagger.spotify_client import SpotifyPopularityUnavailable
 
 
@@ -99,3 +100,27 @@ def test_spotify_disabled_after_first_popularity_unavailable(capsys):
     # calling an API we already know can't answer.
     assert client.calls == 1
     assert "Disabling spotify" in capsys.readouterr().err
+
+
+def test_candidates_normal_row_unchanged():
+    track = TrackInput(raw_path="", artist_hint="Fisher", title_hint="Losing It")
+    assert _resolve_artist_title_candidates(track) == [("Fisher", "Losing It")]
+
+
+def test_candidates_numeric_artist_with_dash_tries_both_orderings():
+    track = TrackInput(raw_path="", artist_hint="33", title_hint="Clarity - Zedd ft. Foxes")
+    candidates = _resolve_artist_title_candidates(track)
+    assert candidates == [
+        ("Zedd ft. Foxes", "Clarity"),
+        ("Clarity", "Zedd ft. Foxes"),
+    ]
+
+
+def test_candidates_numeric_artist_without_dash_drops_artist():
+    track = TrackInput(raw_path="", artist_hint="09", title_hint="Some Standalone Title")
+    assert _resolve_artist_title_candidates(track) == [(None, "Some Standalone Title")]
+
+
+def test_candidates_empty_artist_unchanged():
+    track = TrackInput(raw_path="", artist_hint=None, title_hint="Some Title")
+    assert _resolve_artist_title_candidates(track) == [(None, "Some Title")]

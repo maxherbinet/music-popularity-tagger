@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import re
 import sys
 import time
 from collections import Counter
@@ -31,11 +32,36 @@ DEFAULT_MUSICBRAINZ_CONTACT_EMAIL = "contact@djmaksr.com"
 SearchFn = Callable[[str | None, str], "MatchInfo | None"]
 
 
-def _resolve_artist_title(track: TrackInput) -> tuple[str | None, str]:
+_NUMERIC_ARTIST = re.compile(r"^\d+$")
+
+
+def _resolve_artist_title_candidates(track: TrackInput) -> list[tuple[str | None, str]]:
+    """Returns one or more (artist, title) candidates to try in order,
+    stopping at the first one that gets a confident match.
+
+    Some CSV exports leak a stray track number into the artist field
+    (e.g. artist="33", title="Clarity - Zedd ft. Foxes") instead of a real
+    artist, with the actual "Title - Artist" (or "Artist - Title" — export
+    tools aren't consistent) pair dumped unparsed into the title. There's
+    no way to tell which ordering it is without trying both, so when this
+    pattern is detected, split the title on the first " - " and offer both
+    orderings as candidates rather than guessing.
+    """
     if track.title_hint:
-        return track.artist_hint, track.title_hint
-    parsed = parse_filename(track.filename)
-    return parsed.artist, parsed.title
+        artist, title = track.artist_hint, track.title_hint
+    else:
+        parsed = parse_filename(track.filename)
+        artist, title = parsed.artist, parsed.title
+
+    if artist and _NUMERIC_ARTIST.match(artist.strip()):
+        if " - " in title:
+            part_a, part_b = (p.strip() for p in title.split(" - ", 1))
+            return [(part_b, part_a), (part_a, part_b)]
+        # No " - " to split on, so there's nothing to recover the real
+        # artist from — drop the stray number rather than searching with it.
+        return [(None, title)]
+
+    return [(artist, title)]
 
 
 def _deezer_search_fn(client: DeezerClient) -> SearchFn:
@@ -278,38 +304,47 @@ def main(argv: list[str] | None = None) -> int:
     start = time.time()
 
     for i, track in enumerate(tracks, 1):
-        artist, title = _resolve_artist_title(track)
-        key = normalize_key(artist, title)
+        candidates = _resolve_artist_title_candidates(track)
+        resolved_artist, resolved_title = candidates[0]
 
         match_obj: MatchInfo | None = None
-        for source_name, search_fn in sources:
-            cache_ns = f"match_{source_name}"
-            cached = cache.get(cache_ns, key) if cache else None
-            if cached is None:
-                try:
-                    found = search_fn(artist, title)
-                except requests.exceptions.RequestException as exc:
-                    print(f"  {source_name} request failed for {artist!r} - {title!r}: {exc}", file=sys.stderr)
-                    continue
-                match_dict = vars(found) if found else {}
-                if cache:
-                    cache.set(cache_ns, key, match_dict)
-            else:
-                match_dict = cached
+        for artist, title in candidates:
+            key = normalize_key(artist, title)
+            for source_name, search_fn in sources:
+                cache_ns = f"match_{source_name}"
+                cached = cache.get(cache_ns, key) if cache else None
+                if cached is None:
+                    try:
+                        found = search_fn(artist, title)
+                    except requests.exceptions.RequestException as exc:
+                        print(f"  {source_name} request failed for {artist!r} - {title!r}: {exc}", file=sys.stderr)
+                        continue
+                    match_dict = vars(found) if found else {}
+                    if cache:
+                        cache.set(cache_ns, key, match_dict)
+                else:
+                    match_dict = cached
 
-            if match_dict and match_dict.get("match_confidence", 0) >= args.min_confidence:
-                match_obj = MatchInfo(**match_dict)
-                matched_by_source[source_name] += 1
+                if match_dict and match_dict.get("match_confidence", 0) >= args.min_confidence:
+                    match_obj = MatchInfo(**match_dict)
+                    matched_by_source[source_name] += 1
+                    resolved_artist, resolved_title = artist, title
+                    break
+            if match_obj:
                 break
 
         genre_estimate = None
         if mb is not None:
+            key = normalize_key(resolved_artist, resolved_title)
             tags = cache.get("musicbrainz_tags", key) if cache else None
             if tags is None:
                 try:
-                    mb_match = mb.lookup(artist, title)
+                    mb_match = mb.lookup(resolved_artist, resolved_title)
                 except requests.exceptions.RequestException as exc:
-                    print(f"  musicbrainz request failed for {artist!r} - {title!r}: {exc}", file=sys.stderr)
+                    print(
+                        f"  musicbrainz request failed for {resolved_artist!r} - {resolved_title!r}: {exc}",
+                        file=sys.stderr,
+                    )
                     tags = []
                 else:
                     tags = mb_match.tags if mb_match else []
@@ -317,7 +352,7 @@ def main(argv: list[str] | None = None) -> int:
                         cache.set("musicbrainz_tags", key, tags)
             genre_estimate = estimate_from_tags(tags)
 
-        results.append(build_result(track, artist, title, match_obj, genre_estimate))
+        results.append(build_result(track, resolved_artist, resolved_title, match_obj, genre_estimate))
 
         if i % 25 == 0 or i == len(tracks):
             elapsed = time.time() - start
