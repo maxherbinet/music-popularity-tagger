@@ -8,6 +8,7 @@ import time
 from collections import Counter
 from typing import Callable
 
+import requests
 from dotenv import load_dotenv
 
 from .cache import Cache, normalize_key
@@ -20,8 +21,12 @@ from .lastfm_client import LastfmClient
 from .musicbrainz_client import MusicBrainzClient
 from .scoring import CSV_FIELDNAMES, MatchInfo, build_result
 
-DEFAULT_SOURCES = "deezer,lastfm,discogs,spotify"
+DEFAULT_SOURCES = "deezer,lastfm,discogs,spotify,youtube"
 DEFAULT_MIN_CONFIDENCE = 55.0
+# Fallback when MUSICBRAINZ_CONTACT_EMAIL isn't set. Just a contact string
+# for MusicBrainz/Discogs's User-Agent policy, not an account — swap for a
+# real inbox before running at any real volume.
+DEFAULT_MUSICBRAINZ_CONTACT_EMAIL = "contact@djmaksr.com"
 
 SearchFn = Callable[[str | None, str], "MatchInfo | None"]
 
@@ -85,13 +90,47 @@ def _discogs_search_fn(client: DiscogsClient) -> SearchFn:
 
 
 def _spotify_search_fn(client) -> SearchFn:
+    from .spotify_client import SpotifyPopularityUnavailable
+
+    unavailable = False
+
     def search(artist: str | None, title: str) -> MatchInfo | None:
-        match = client.search_track(artist, title)
+        nonlocal unavailable
+        if unavailable:
+            return None
+        try:
+            match = client.search_track(artist, title)
+        except SpotifyPopularityUnavailable:
+            print(
+                "Disabling spotify for the rest of this run: its API responded without a "
+                "'popularity' field (this app needs Extended Quota Mode — see "
+                "https://developer.spotify.com/dashboard). Falling through to the next source.",
+                file=sys.stderr,
+            )
+            unavailable = True
+            return None
         if match is None:
             return None
         return MatchInfo(
             source="spotify",
             match_id=match.spotify_id,
+            artist=match.artist,
+            title=match.title,
+            popularity=match.popularity,
+            match_confidence=match.match_confidence,
+        )
+
+    return search
+
+
+def _youtube_search_fn(client) -> SearchFn:
+    def search(artist: str | None, title: str) -> MatchInfo | None:
+        match = client.search_track(artist, title)
+        if match is None:
+            return None
+        return MatchInfo(
+            source="youtube",
+            match_id=match.video_id,
             artist=match.artist,
             title=match.title,
             popularity=match.popularity,
@@ -113,7 +152,11 @@ def _build_sources(names: list[str]) -> list[tuple[str, SearchFn]]:
             sources.append((name, _deezer_search_fn(DeezerClient())))
 
         elif name == "lastfm":
-            key = os.environ.get("LASTFM_API_KEY")
+            # LASTFM_APIKEY accepted as an alias for LASTFM_API_KEY. The
+            # secret Last.fm issues alongside the key is for the write/session
+            # auth flow and isn't needed for this read-only search, so
+            # LASTFM_SECRET is intentionally not read here.
+            key = os.environ.get("LASTFM_API_KEY") or os.environ.get("LASTFM_APIKEY")
             if not key:
                 print(
                     "Skipping lastfm: LASTFM_API_KEY not set (free, instant key at "
@@ -127,6 +170,11 @@ def _build_sources(names: list[str]) -> list[tuple[str, SearchFn]]:
             token = os.environ.get("DISCOGS_TOKEN")
             key = os.environ.get("DISCOGS_KEY")
             secret = os.environ.get("DISCOGS_SECRET")
+            if not token and key and not secret:
+                # DISCOGS_KEY set alone (no secret) is treated as a personal
+                # access token rather than the first half of a consumer
+                # key/secret pair.
+                token, key = key, None
             if not token and not (key and secret):
                 print(
                     "Skipping discogs: neither DISCOGS_TOKEN nor DISCOGS_KEY+DISCOGS_SECRET are set "
@@ -134,7 +182,7 @@ def _build_sources(names: list[str]) -> list[tuple[str, SearchFn]]:
                     file=sys.stderr,
                 )
                 continue
-            contact = os.environ.get("MUSICBRAINZ_CONTACT_EMAIL", "music-popularity-tagger")
+            contact = os.environ.get("MUSICBRAINZ_CONTACT_EMAIL", DEFAULT_MUSICBRAINZ_CONTACT_EMAIL)
             sources.append(
                 (name, _discogs_search_fn(DiscogsClient(token=token, key=key, secret=secret, contact=contact)))
             )
@@ -152,6 +200,19 @@ def _build_sources(names: list[str]) -> list[tuple[str, SearchFn]]:
             from .spotify_client import SpotifyClient
 
             sources.append((name, _spotify_search_fn(SpotifyClient(client_id, client_secret))))
+
+        elif name == "youtube":
+            api_key = os.environ.get("YOUTUBE_API_KEY")
+            if not api_key:
+                print(
+                    "Skipping youtube: YOUTUBE_API_KEY not set (free key, YouTube Data API v3, at "
+                    "https://console.cloud.google.com/apis/credentials)",
+                    file=sys.stderr,
+                )
+                continue
+            from .youtube_client import YoutubeClient
+
+            sources.append((name, _youtube_search_fn(YoutubeClient(api_key))))
 
         else:
             print(f"Unknown source '{name}', ignoring", file=sys.stderr)
@@ -202,15 +263,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"Popularity source chain: {' -> '.join(name for name, _ in sources)}", file=sys.stderr)
 
-    contact = os.environ.get("MUSICBRAINZ_CONTACT_EMAIL")
-    if not args.skip_genre and not contact:
-        print(
-            "Missing MUSICBRAINZ_CONTACT_EMAIL (required by MusicBrainz's usage policy for their User-Agent header).\n"
-            "It's just a contact string, not an account — set any email in .env, or pass --skip-genre to run "
-            "Popularity-only.",
-            file=sys.stderr,
-        )
-        return 1
+    contact = os.environ.get("MUSICBRAINZ_CONTACT_EMAIL", DEFAULT_MUSICBRAINZ_CONTACT_EMAIL)
 
     tracks = load_tracks(args.input, fmt=args.format)
     if args.limit:
@@ -233,7 +286,11 @@ def main(argv: list[str] | None = None) -> int:
             cache_ns = f"match_{source_name}"
             cached = cache.get(cache_ns, key) if cache else None
             if cached is None:
-                found = search_fn(artist, title)
+                try:
+                    found = search_fn(artist, title)
+                except requests.exceptions.RequestException as exc:
+                    print(f"  {source_name} request failed for {artist!r} - {title!r}: {exc}", file=sys.stderr)
+                    continue
                 match_dict = vars(found) if found else {}
                 if cache:
                     cache.set(cache_ns, key, match_dict)
@@ -249,10 +306,15 @@ def main(argv: list[str] | None = None) -> int:
         if mb is not None:
             tags = cache.get("musicbrainz_tags", key) if cache else None
             if tags is None:
-                mb_match = mb.lookup(artist, title)
-                tags = mb_match.tags if mb_match else []
-                if cache:
-                    cache.set("musicbrainz_tags", key, tags)
+                try:
+                    mb_match = mb.lookup(artist, title)
+                except requests.exceptions.RequestException as exc:
+                    print(f"  musicbrainz request failed for {artist!r} - {title!r}: {exc}", file=sys.stderr)
+                    tags = []
+                else:
+                    tags = mb_match.tags if mb_match else []
+                    if cache:
+                        cache.set("musicbrainz_tags", key, tags)
             genre_estimate = estimate_from_tags(tags)
 
         results.append(build_result(track, artist, title, match_obj, genre_estimate))

@@ -12,8 +12,8 @@ actually worth re-downloading instead of pulling everything back blind.
    artist/title guesses — either from explicit columns/metadata, or parsed
    out of the raw filename (`Artist - Title (Original Mix).mp3` etc.).
 2. Looks each track up through an **ordered fallback chain of popularity
-   sources** (`--sources`, default `deezer,lastfm,discogs,spotify`). Each
-   track goes down the chain until a source returns a match at or above
+   sources** (`--sources`, default `deezer,lastfm,discogs,spotify,youtube`).
+   Each track goes down the chain until a source returns a match at or above
    `--min-confidence`; that source's popularity number is used and the
    rest of the chain is skipped for that track. Any source missing its
    credentials in `.env` is skipped automatically at startup, no need to
@@ -30,6 +30,13 @@ actually worth re-downloading instead of pulling everything back blind.
    - **Spotify** — Client Credentials flow, needs a free app at
      https://developer.spotify.com/dashboard. Uses Spotify's own
      `popularity` field directly.
+   - **YouTube** — last resort, tried only after the four sources above
+     have all missed. Free API key (YouTube Data API v3) from
+     https://console.cloud.google.com/apis/credentials. Uses the
+     best-matching video's view count, log-scaled. The free quota (10,000
+     units/day, ~100 per lookup) only covers ~99 tracks/day, so this is
+     meant to fill occasional gaps, not tag a whole library — put it last
+     in `--sources` (the default) rather than first.
 3. Optionally looks up genre tags on **MusicBrainz** and estimates
    **Energy**/**Danceability** from a genre heuristic table (see
    `src/tagger/genre_heuristics.py`). This is an approximation, not a
@@ -57,6 +64,9 @@ just skipped, and Deezer alone needs nothing):
   https://www.discogs.com/settings/developers
 - `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` — https://developer.spotify.com/dashboard
   (Client Credentials flow, no redirect URI or user login needed)
+- `YOUTUBE_API_KEY` — https://console.cloud.google.com/apis/credentials
+  (enable "YouTube Data API v3" on a free project, no billing account
+  needed for search-only usage; free quota is ~99 tracks/day, see above)
 - `MUSICBRAINZ_CONTACT_EMAIL` — any contact string, required by
   MusicBrainz's usage policy for their User-Agent header. Not an account,
   just a text field. Only needed unless you pass `--skip-genre`.
@@ -251,8 +261,11 @@ on faith.
 ### Notes on scale and coverage
 
 - MusicBrainz enforces ~1 request/second for unauthenticated clients, and
-  each track needs two calls (search + tag lookup), so genre lookups for
-  ~12k tracks will take several hours. Discogs is similarly two calls/track
+  each track needs two calls (search + tag lookup) — three for most tracks
+  in practice, since individual recordings are rarely tagged on MusicBrainz
+  (genre folksonomy effort goes into artist entities instead), triggering a
+  fallback call to the artist's tags. Genre lookups for ~12k tracks will
+  take several hours either way. Discogs is similarly two calls/track
   (search + release lookup) with a conservative ~1 req/sec throttle. Results
   are cached in `.tagger_cache.sqlite3`, so interrupting and re-running
   picks up where you left off. Use `--skip-genre` if you just want
@@ -268,14 +281,14 @@ on faith.
   out a lot of DJ libraries. Last.fm and Discogs both tend to cover that
   gap better. A `matched=False` row after the whole chain has been tried
   isn't necessarily worthless, it may just be genuinely obscure across all
-  four catalogs; those rows sort to the bottom (`worth_score=0`) and are
+  five catalogs; those rows sort to the bottom (`worth_score=0`) and are
   worth a manual look rather than being discarded outright.
 - Popularity numbers aren't on a truly comparable scale across sources
-  (Deezer rank, Last.fm listeners, Discogs want-count, and Spotify
-  popularity are all different metrics normalized independently to 0-100)
-  — treat `worth_score` as "roughly how in-demand is this," not a precise
-  cross-source ranking. The `source` column tells you which metric produced
-  each row's number.
+  (Deezer rank, Last.fm listeners, Discogs want-count, Spotify popularity,
+  and YouTube view count are all different metrics normalized independently
+  to 0-100) — treat `worth_score` as "roughly how in-demand is this," not a
+  precise cross-source ranking. The `source` column tells you which metric
+  produced each row's number.
 
 ## Tests
 

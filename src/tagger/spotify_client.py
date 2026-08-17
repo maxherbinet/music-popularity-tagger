@@ -25,6 +25,17 @@ _TOKEN_URL = "https://accounts.spotify.com/api/token"
 _SEARCH_URL = "https://api.spotify.com/v1/search"
 
 
+class SpotifyPopularityUnavailable(RuntimeError):
+    """Raised when Spotify's API responds without a `popularity` field at
+    all. Newly created apps default to a restricted access tier (the same
+    one that locked out `audio-features`, see module docstring) that omits
+    `popularity` from track objects entirely — treating a missing field as
+    0 would misreport genuinely popular tracks as worthless. Request
+    "Extended Quota Mode" for the app at
+    https://developer.spotify.com/dashboard to get real values.
+    """
+
+
 @dataclass
 class SpotifyMatch:
     spotify_id: str
@@ -97,11 +108,14 @@ class SpotifyClient:
         if best is None:
             return None
 
+        if "popularity" not in best:
+            raise SpotifyPopularityUnavailable
+
         return SpotifyMatch(
             spotify_id=best["id"],
             artist=", ".join(a["name"] for a in best.get("artists", [])),
             title=best["name"],
-            popularity=best.get("popularity", 0),
+            popularity=best["popularity"],
             release_date=(best.get("album") or {}).get("release_date"),
             match_confidence=round(best_score, 1),
         )
